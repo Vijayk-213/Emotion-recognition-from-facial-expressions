@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Emotion Recognition</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .animate-pulse {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .5; }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen p-8">
+    <div class="max-w-4xl mx-auto bg-white rounded-xl shadow-md overflow-hidden">
+        <div class="p-8">
+            <h1 class="text-3xl font-bold text-center mb-8">Emotion Recognition</h1>
+            
+            <div class="mb-8">
+                <h2 class="text-xl font-semibold mb-4">Image Upload</h2>
+                <form id="uploadForm" class="flex items-center space-x-4">
+                    <input type="file" id="imageUpload" accept="image/*" class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
+                    <button type="submit" class="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50">
+                        Analyze
+                    </button>
+                </form>
+            </div>
+            
+            <div class="mb-8">
+                <h2 class="text-xl font-semibold mb-4">Camera Capture</h2>
+                <div class="flex items-center space-x-4 mb-4">
+                    <select id="cameraSelect" class="block w-full px-3 py-2 text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500">
+                        <option value="">Select a camera</option>
+                    </select>
+                    <button id="startCamera" class="px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50">
+                        Start Camera
+                    </button>
+                </div>
+                <button id="captureImage" class="px-4 py-2 bg-purple-500 text-white rounded-md hover:bg-purple-600 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-opacity-50 hidden">
+                    Capture Image
+                </button>
+            </div>
+            
+            <div id="cameraFeed" class="mb-8 hidden">
+                <video id="video" width="640" height="480" autoplay></video>
+                <canvas id="canvas" width="640" height="480" class="hidden"></canvas>
+            </div>
+            
+            <div id="imageResult" class="mb-8 hidden">
+                <h2 class="text-xl font-semibold mb-4">Result</h2>
+                <div class="aspect-w-16 aspect-h-9 bg-gray-200 rounded-lg overflow-hidden">
+                    <img id="resultImage" src="" alt="Analyzed Image" class="object-contain w-full h-full" />
+                </div>
+                <div id="emotions" class="mt-4 grid grid-cols-2 gap-4">
+                    <!-- Emotion results will be inserted here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const uploadForm = document.getElementById('uploadForm');
+        const imageUpload = document.getElementById('imageUpload');
+        const imageResult = document.getElementById('imageResult');
+        const resultImage = document.getElementById('resultImage');
+        const emotions = document.getElementById('emotions');
+        const startCamera = document.getElementById('startCamera');
+        const captureImage = document.getElementById('captureImage');
+        const cameraFeed = document.getElementById('cameraFeed');
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const cameraSelect = document.getElementById('cameraSelect');
+
+        let stream;
+
+        // Populate camera options
+        async function populateCameraOptions() {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const videoDevices = devices.filter(device => device.kind === 'videoinput');
+            videoDevices.forEach(device => {
+                const option = document.createElement('option');
+                option.value = device.deviceId;
+                option.text = device.label || `Camera ${cameraSelect.length + 1}`;
+                cameraSelect.appendChild(option);
+            });
+        }
+
+        populateCameraOptions();
+
+        uploadForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const file = imageUpload.files[0];
+            if (file) {
+                const formData = new FormData();
+                formData.append('image', file);
+                await analyzeImage(formData);
+            }
+        });
+
+        startCamera.addEventListener('click', async () => {
+            const deviceId = cameraSelect.value;
+            if (!deviceId) {
+                alert("Please select a camera");
+                return;
+            }
+            try {
+                if (stream) {
+                    stream.getTracks().forEach(track => track.stop());
+                }
+                stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { deviceId: { exact: deviceId } } 
+                });
+                video.srcObject = stream;
+                cameraFeed.classList.remove('hidden');
+                captureImage.classList.remove('hidden');
+            } catch (err) {
+                console.error("Error accessing the camera", err);
+                alert("Error accessing the camera. Please make sure you have given permission to use the camera.");
+            }
+        });
+
+        captureImage.addEventListener('click', () => {
+            const context = canvas.getContext('2d');
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const imageDataUrl = canvas.toDataURL('image/jpeg');
+            
+            const formData = new FormData();
+            formData.append('image', imageDataUrl);
+            analyzeImage(formData);
+        });
+
+        async function analyzeImage(formData) {
+            try {
+                const response = await fetch('/analyze-image', { method: 'POST', body: formData });
+                const result = await response.json();
+                if (response.ok) {
+                    displayResult(result);
+                } else {
+                    console.error('Error:', result.error);
+                    alert('Error: ' + result.error);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('An error occurred while processing the image.');
+            }
+        }
+
+        function displayResult(result) {
+            resultImage.src = result.image_url;
+            emotions.innerHTML = '';
+            for (const [emotion, score] of Object.entries(result.emotions)) {
+                emotions.innerHTML += `
+                    <div class="bg-gray-100 rounded-lg p-4">
+                        <div class="font-semibold">${emotion}</div>
+                        <div class="w-full bg-gray-300 rounded-full h-2.5">
+                            <div class="bg-blue-600 h-2.5 rounded-full" style="width: ${score * 100}%"></div>
+                        </div>
+                        <div class="text-sm text-gray-600">${(score * 100).toFixed(2)}%</div>
+                    </div>
+                `;
+            }
+            imageResult.classList.remove('hidden');
+        }
+    </script>
+</body>
+</html>
